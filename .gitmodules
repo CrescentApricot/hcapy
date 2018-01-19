@@ -1,0 +1,3 @@
+[submodule "hca2wav"]
+	path = hca2wav
+	url = git@github.com:Cryptomelone/hca2wav.git
