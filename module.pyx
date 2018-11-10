@@ -1,5 +1,12 @@
 # distutils: language = c++
 import os
+import tempfile
+import io
+
+
+class InvalidHCAError(Exception):
+    pass
+
 
 cdef extern from "hca2wav/include/clHCA.h":
     cdef cppclass clHCA:
@@ -19,8 +26,9 @@ cdef class clHCApy:
     def __dealloc__(self):
         del self.thisptr
 
-    def decode(self, const char* src, const char* dest, float volume=1., int mode=16, int loop=0):
+    def decode_file(self, const char* src, const char* dest, float volume=1., int mode=16, int loop=0):
         return self.thisptr.DecodeToWaveFile(src, dest, volume, mode, loop)
+
 
 class Decoder:
     def __init__(self, cipher_key, cipher_key_2=None):
@@ -33,7 +41,7 @@ class Decoder:
             elif type(cipher_key) == int:
                 h = hex(cipher_key)[2:].zfill(16)
             else:
-                raise Exception("cipher_key is must str(hex) or int.")
+                raise ValueError("cipher_key is must str(hex) or int.")
             self.cipher_key_1 = atoi16(h[8:].encode())
             self.cipher_key_2 = atoi16(h[:8].encode())
 
@@ -43,17 +51,30 @@ class Decoder:
             elif type(cipher_key) == str:
                 self.cipher_key_1 = atoi16(cipher_key.encode())
             else:
-                raise Exception("cipher_key is must str(hex) or int.")
+                raise ValueError("cipher_key is must str(hex) or int.")
             if type(cipher_key_2) == int:
                 self.cipher_key_2 = cipher_key_2
             elif type(cipher_key_2) == str:
                 self.cipher_key_2 = atoi16(cipher_key_2.encode())
             else:
-                raise Exception("cipher_key is must str(hex) or int.")
+                raise ValueError("cipher_key is must str(hex) or int.")
         else:
-            raise Exception("cipher_key was not spec.")
+            raise ValueError("cipher_key was not spec.")
 
         self.decoder = clHCApy(self.cipher_key_1, self.cipher_key_2)
+
+    def decode(self, src: bytes, volume: float=1., mode: int=16, loop: int=0) -> io.BytesIO:
+        with tempfile.TemporaryDirectory() as tmp:
+            t_src = os.path.join(tmp, "src.bin")
+            t_dest = os.path.join(tmp, "dest.bin")
+            with open(t_src, "wb") as t_src_o:
+                t_src_o.write(src)
+            self.decoder.decode_file(t_src.encode(), t_dest.encode(), volume, mode, loop)
+            if os.path.exists(t_dest):
+                with open(t_dest, "rb") as t_dest_o:
+                    return io.BytesIO(t_dest_o.read())
+            else:
+                raise InvalidHCAError("hca decode failed.")
 
     def decode_file(self, src: str, dest=None, volume: float=1., mode: int=16, loop: int=0):
         if dest:
@@ -68,4 +89,4 @@ class Decoder:
                 src_file_spl[-1] = "wav"
                 dest_file = ".".join(src_file_spl)
             dest_e = os.path.join(dest_dir, dest_file).encode()
-        return self.decoder.decode(src.encode(), dest_e, volume, mode, loop)
+        return self.decoder.decode_file(src.encode(), dest_e, volume, mode, loop)
